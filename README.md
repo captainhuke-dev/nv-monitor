@@ -133,6 +133,14 @@ The UI has a `CLASS (SYSTEM / USER)` column and a `REASON` column:
 - Other `SYSTEM` processes require explicit confirmation before stopping.
 - Every action rechecks the PID creation time to prevent PID reuse errors.
 
+### Sorting and process groups
+
+- Click a table header to sort; click it again to reverse the direction.
+- Sortable fields include class, reason, PID, user, CPU, RAM, GPU memory, and
+  command.
+- Use `Group by` to show collapsible `SYSTEM / USER` categories, groups by
+  system reason, or a flat ungrouped list.
+
 ### Local-only startup
 
 Install the Python dependency outside the repository's source tree, then start

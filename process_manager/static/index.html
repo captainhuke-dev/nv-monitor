@@ -10,7 +10,7 @@
     header { padding: 18px 24px; background: #1f2937; position: sticky; top: 0; z-index: 2; }
     h1 { margin: 0 0 10px; font-size: 1.35rem; }
     .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
-    input, button { border: 1px solid #4b5563; border-radius: 5px; padding: 7px 10px; background: #111827; color: #e5e7eb; }
+    input, select, button { border: 1px solid #4b5563; border-radius: 5px; padding: 7px 10px; background: #111827; color: #e5e7eb; }
     button { cursor: pointer; background: #374151; }
     button:disabled { cursor: not-allowed; opacity: .45; }
     #message { min-height: 1.3em; color: #fbbf24; }
@@ -18,6 +18,14 @@
     table { width: 100%; border-collapse: collapse; font-size: .86rem; white-space: nowrap; }
     th, td { border-bottom: 1px solid #374151; padding: 8px 7px; text-align: left; vertical-align: top; }
     th { position: sticky; top: 91px; background: #1f2937; }
+    .sort-button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; font-weight: 700; }
+    .sort-button:hover, .sort-button:focus-visible { color: #93c5fd; }
+    .sort-indicator { color: #93c5fd; margin-left: 3px; }
+    .group-row td { background: #253248; border-bottom-color: #4b5563; padding: 6px 7px; }
+    .group-toggle { width: 100%; border: 0; padding: 2px 0; background: transparent; color: #f3f4f6; text-align: left; font-weight: 700; }
+    .group-toggle:hover, .group-toggle:focus-visible { color: #93c5fd; }
+    .group-count { color: #9ca3af; font-weight: 400; }
+    .action-buttons { display: flex; gap: 5px; }
     .badge { display: inline-block; border-radius: 999px; padding: 2px 7px; font-weight: 700; font-size: .72rem; }
     .system { background: #7f1d1d; color: #fecaca; }
     .user { background: #1e3a8a; color: #bfdbfe; }
@@ -33,12 +41,28 @@
       <input id="token" type="password" placeholder="Bearer token" autocomplete="off">
       <button id="save-token">Save token</button>
       <button id="refresh">Refresh</button>
+      <label for="group-mode">Group by</label>
+      <select id="group-mode">
+        <option value="classification">Category (SYSTEM / USER)</option>
+        <option value="reason">System reason</option>
+        <option value="none">No groups</option>
+      </select>
       <span id="message" role="status"></span>
     </div>
   </header>
   <div class="table-wrap">
     <table>
-      <thead><tr><th>CLASS (SYSTEM / USER)</th><th>REASON</th><th>PID</th><th>USER</th><th>CPU</th><th>RAM</th><th>GPU MEM</th><th>COMMAND</th><th>ACTION</th></tr></thead>
+      <thead><tr>
+        <th><button class="sort-button" type="button" data-sort="classification">CLASS (SYSTEM / USER)<span class="sort-indicator"></span></button></th>
+        <th><button class="sort-button" type="button" data-sort="reason">REASON<span class="sort-indicator"></span></button></th>
+        <th><button class="sort-button" type="button" data-sort="pid">PID<span class="sort-indicator"></span></button></th>
+        <th><button class="sort-button" type="button" data-sort="user">USER<span class="sort-indicator"></span></button></th>
+        <th><button class="sort-button" type="button" data-sort="cpu">CPU<span class="sort-indicator"></span></button></th>
+        <th><button class="sort-button" type="button" data-sort="rss">RAM<span class="sort-indicator"></span></button></th>
+        <th><button class="sort-button" type="button" data-sort="gpu">GPU MEM<span class="sort-indicator"></span></button></th>
+        <th><button class="sort-button" type="button" data-sort="command">COMMAND<span class="sort-indicator"></span></button></th>
+        <th>ACTION</th>
+      </tr></thead>
       <tbody id="processes"></tbody>
     </table>
   </div>
@@ -46,7 +70,13 @@
     const tokenInput = document.getElementById('token');
     const message = document.getElementById('message');
     const body = document.getElementById('processes');
+    const groupMode = document.getElementById('group-mode');
+    const sortButtons = Array.from(document.querySelectorAll('[data-sort]'));
     tokenInput.value = sessionStorage.getItem('process-manager-token') || '';
+
+    let currentProcesses = [];
+    let sortState = { key: 'pid', direction: 'asc' };
+    const collapsedGroups = new Set();
 
     function formatBytes(value) {
       if (!value) return '0 B';
@@ -70,45 +100,152 @@
       return cell;
     }
 
+    function reasonText(process) {
+      return process.system_reason_labels.join(', ') || '—';
+    }
+
+    const sortAccessors = {
+      classification: process => process.classification,
+      reason: process => reasonText(process),
+      pid: process => process.pid,
+      user: process => process.user,
+      cpu: process => process.cpu_percent,
+      rss: process => process.rss_bytes,
+      gpu: process => process.gpu_memory_bytes,
+      command: process => process.cmdline,
+    };
+
+    function compareValues(left, right) {
+      if (typeof left === 'number' && typeof right === 'number') return left - right;
+      return String(left).localeCompare(String(right), undefined, { numeric: true, sensitivity: 'base' });
+    }
+
+    function sortProcesses(processes) {
+      const accessor = sortAccessors[sortState.key] || sortAccessors.pid;
+      const direction = sortState.direction === 'asc' ? 1 : -1;
+      return [...processes].sort((left, right) => {
+        const comparison = compareValues(accessor(left), accessor(right));
+        return comparison === 0 ? left.pid - right.pid : comparison * direction;
+      });
+    }
+
+    function groupLabel(process) {
+      if (groupMode.value === 'classification') return process.classification || 'UNKNOWN';
+      if (groupMode.value === 'reason') {
+        return process.is_system ? (process.system_reason_labels.join(', ') || 'SYSTEM') : 'USER';
+      }
+      return 'All processes';
+    }
+
+    function groupKey(label) {
+      return groupMode.value + ':' + label;
+    }
+
+    function appendProcessRow(process) {
+      const row = document.createElement('tr');
+      const classCell = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = 'badge ' + (process.is_system ? 'system' : 'user');
+      badge.textContent = process.classification;
+      classCell.appendChild(badge);
+      row.appendChild(classCell);
+      addCell(row, reasonText(process), 'reason');
+      addCell(row, String(process.pid));
+      addCell(row, process.user);
+      addCell(row, process.cpu_percent.toFixed(1) + '%');
+      addCell(row, formatBytes(process.rss_bytes));
+      addCell(row, formatBytes(process.gpu_memory_bytes));
+      addCell(row, process.cmdline, 'command');
+      const actionCell = document.createElement('td');
+      const actionButtons = document.createElement('div');
+      actionButtons.className = 'action-buttons';
+      const stop = document.createElement('button');
+      stop.textContent = 'Stop';
+      stop.disabled = process.protected;
+      stop.title = process.protected ? 'Protected system process' : 'Send SIGTERM';
+      stop.addEventListener('click', () => stopProcess(process, false));
+      actionButtons.appendChild(stop);
+      const force = document.createElement('button');
+      force.textContent = 'Force';
+      force.disabled = process.protected;
+      force.title = process.protected ? 'Protected system process' : 'Send SIGKILL';
+      force.addEventListener('click', () => stopProcess(process, true));
+      actionButtons.appendChild(force);
+      actionCell.appendChild(actionButtons);
+      if (process.protected) {
+        const note = document.createElement('div');
+        note.className = 'protected';
+        note.textContent = 'protected';
+        actionCell.appendChild(note);
+      }
+      row.appendChild(actionCell);
+      body.appendChild(row);
+    }
+
+    function appendGroupRow(label, processes) {
+      const key = groupKey(label);
+      const collapsed = collapsedGroups.has(key);
+      const row = document.createElement('tr');
+      row.className = 'group-row';
+      const cell = document.createElement('td');
+      cell.colSpan = 9;
+      const toggle = document.createElement('button');
+      toggle.className = 'group-toggle';
+      toggle.type = 'button';
+      toggle.setAttribute('aria-expanded', String(!collapsed));
+      toggle.textContent = (collapsed ? '▸ ' : '▾ ') + label + ' ';
+      const count = document.createElement('span');
+      count.className = 'group-count';
+      count.textContent = '(' + processes.length + ')';
+      toggle.appendChild(count);
+      toggle.addEventListener('click', () => toggleGroup(key));
+      cell.appendChild(toggle);
+      row.appendChild(cell);
+      body.appendChild(row);
+    }
+
+    function toggleGroup(key) {
+      if (collapsedGroups.has(key)) collapsedGroups.delete(key);
+      else collapsedGroups.add(key);
+      render(currentProcesses);
+    }
+
     function render(processes) {
       body.replaceChildren();
-      for (const process of processes) {
-        const row = document.createElement('tr');
-        const classCell = document.createElement('td');
-        const badge = document.createElement('span');
-        badge.className = 'badge ' + (process.is_system ? 'system' : 'user');
-        badge.textContent = process.classification;
-        classCell.appendChild(badge);
-        row.appendChild(classCell);
-        addCell(row, process.system_reason_labels.join(', ') || '—', 'reason');
-        addCell(row, String(process.pid));
-        addCell(row, process.user);
-        addCell(row, process.cpu_percent.toFixed(1) + '%');
-        addCell(row, formatBytes(process.rss_bytes));
-        addCell(row, formatBytes(process.gpu_memory_bytes));
-        addCell(row, process.cmdline, 'command');
-        const actionCell = document.createElement('td');
-        const stop = document.createElement('button');
-        stop.textContent = 'Stop';
-        stop.disabled = process.protected;
-        stop.title = process.protected ? 'Protected system process' : 'Send SIGTERM';
-        stop.addEventListener('click', () => stopProcess(process, false));
-        actionCell.appendChild(stop);
-        const force = document.createElement('button');
-        force.textContent = 'Force';
-        force.disabled = process.protected;
-        force.title = process.protected ? 'Protected system process' : 'Send SIGKILL';
-        force.addEventListener('click', () => stopProcess(process, true));
-        actionCell.appendChild(force);
-        if (process.protected) {
-          const note = document.createElement('div');
-          note.className = 'protected';
-          note.textContent = 'protected';
-          actionCell.appendChild(note);
-        }
-        row.appendChild(actionCell);
-        body.appendChild(row);
+      const sorted = sortProcesses(processes);
+      if (groupMode.value === 'none') {
+        sorted.forEach(appendProcessRow);
+        return;
       }
+      const groups = new Map();
+      for (const process of sorted) {
+        const label = groupLabel(process);
+        if (!groups.has(label)) groups.set(label, []);
+        groups.get(label).push(process);
+      }
+      for (const [label, groupedProcesses] of groups) {
+        appendGroupRow(label, groupedProcesses);
+        if (!collapsedGroups.has(groupKey(label))) groupedProcesses.forEach(appendProcessRow);
+      }
+    }
+
+    function updateSortIndicators() {
+      for (const button of sortButtons) {
+        const indicator = button.querySelector('.sort-indicator');
+        const active = button.dataset.sort === sortState.key;
+        indicator.textContent = active ? (sortState.direction === 'asc' ? ' ▲' : ' ▼') : '';
+        button.setAttribute('aria-sort', active ? (sortState.direction === 'asc' ? 'ascending' : 'descending') : 'none');
+      }
+    }
+
+    function toggleSort(key) {
+      if (sortState.key === key) {
+        sortState.direction = sortState.direction === 'asc' ? 'desc' : 'asc';
+      } else {
+        sortState = { key, direction: 'asc' };
+      }
+      updateSortIndicators();
+      render(currentProcesses);
     }
 
     let loading = false;
@@ -119,7 +256,8 @@
         const response = await fetch('/api/processes', { headers: authHeaders(), cache: 'no-store' });
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.message || payload.error_code);
-        render(payload.processes);
+        currentProcesses = payload.processes;
+        render(currentProcesses);
         message.textContent = 'Updated ' + new Date(payload.generated_at).toLocaleTimeString();
       } catch (error) {
         message.textContent = String(error.message || error);
@@ -147,6 +285,9 @@
       loadProcesses();
     });
     document.getElementById('refresh').addEventListener('click', loadProcesses);
+    groupMode.addEventListener('change', () => render(currentProcesses));
+    sortButtons.forEach(button => button.addEventListener('click', () => toggleSort(button.dataset.sort)));
+    updateSortIndicators();
     loadProcesses();
     setInterval(loadProcesses, 2000);
   </script>
