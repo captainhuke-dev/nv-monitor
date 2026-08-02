@@ -138,8 +138,9 @@ The UI has a `CLASS (SYSTEM / USER)` column and a `REASON` column:
 - Click a table header to sort; click it again to reverse the direction.
 - Sortable fields include class, reason, PID, user, CPU, RAM, GPU memory, and
   command.
-- Use `Group by` to show collapsible `SYSTEM / USER` categories, groups by
-  system reason, or a flat ungrouped list.
+- Use `Group by` to show category tag buttons; click tags to show or hide
+  `SYSTEM / USER` categories, groups by system reason, or a flat ungrouped
+  list.
 
 ### Local-only startup
 

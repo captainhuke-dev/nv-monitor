@@ -95,6 +95,9 @@ class ServerTests(unittest.TestCase):
         self.assertIn('data-sort="gpu"', page)
         self.assertIn("function toggleSort", page)
         self.assertIn("function toggleGroup", page)
+        self.assertIn('id="category-tags"', page)
+        self.assertIn("category-tag", page)
+        self.assertIn("aria-pressed", page)
 
     def test_wildcard_bind_requires_explicit_override(self):
         with self.assertRaises(ValueError):

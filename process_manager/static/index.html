@@ -21,10 +21,15 @@
     .sort-button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; font-weight: 700; }
     .sort-button:hover, .sort-button:focus-visible { color: #93c5fd; }
     .sort-indicator { color: #93c5fd; margin-left: 3px; }
-    .group-row td { background: #253248; border-bottom-color: #4b5563; padding: 6px 7px; }
-    .group-toggle { width: 100%; border: 0; padding: 2px 0; background: transparent; color: #f3f4f6; text-align: left; font-weight: 700; }
-    .group-toggle:hover, .group-toggle:focus-visible { color: #93c5fd; }
-    .group-count { color: #9ca3af; font-weight: 400; }
+    .category-tags { display: flex; gap: 7px; flex-wrap: wrap; padding: 0 24px 4px; }
+    .category-tag { border-radius: 999px; padding: 5px 11px; background: #374151; color: #e5e7eb; }
+    .category-tag.system { background: #7f1d1d; color: #fecaca; }
+    .category-tag.user { background: #1e3a8a; color: #bfdbfe; }
+    .category-tag[aria-pressed="false"] { opacity: .48; }
+    .category-tag[aria-pressed="true"] { box-shadow: 0 0 0 1px #93c5fd; }
+    .category-tag:hover, .category-tag:focus-visible { filter: brightness(1.2); }
+    .category-tag-count { margin-left: 4px; opacity: .75; }
+    .category-empty td { color: #9ca3af; padding: 18px 7px; text-align: center; }
     .action-buttons { display: flex; gap: 5px; }
     .badge { display: inline-block; border-radius: 999px; padding: 2px 7px; font-weight: 700; font-size: .72rem; }
     .system { background: #7f1d1d; color: #fecaca; }
@@ -50,6 +55,7 @@
       <span id="message" role="status"></span>
     </div>
   </header>
+  <div id="category-tags" class="category-tags" aria-label="Process categories"></div>
   <div class="table-wrap">
     <table>
       <thead><tr>
@@ -70,6 +76,7 @@
     const tokenInput = document.getElementById('token');
     const message = document.getElementById('message');
     const body = document.getElementById('processes');
+    const categoryTags = document.getElementById('category-tags');
     const groupMode = document.getElementById('group-mode');
     const sortButtons = Array.from(document.querySelectorAll('[data-sort]'));
     tokenInput.value = sessionStorage.getItem('process-manager-token') || '';
@@ -182,26 +189,29 @@
       body.appendChild(row);
     }
 
-    function appendGroupRow(label, processes) {
-      const key = groupKey(label);
-      const collapsed = collapsedGroups.has(key);
-      const row = document.createElement('tr');
-      row.className = 'group-row';
-      const cell = document.createElement('td');
-      cell.colSpan = 9;
-      const toggle = document.createElement('button');
-      toggle.className = 'group-toggle';
-      toggle.type = 'button';
-      toggle.setAttribute('aria-expanded', String(!collapsed));
-      toggle.textContent = (collapsed ? '▸ ' : '▾ ') + label + ' ';
-      const count = document.createElement('span');
-      count.className = 'group-count';
-      count.textContent = '(' + processes.length + ')';
-      toggle.appendChild(count);
-      toggle.addEventListener('click', () => toggleGroup(key));
-      cell.appendChild(toggle);
-      row.appendChild(cell);
-      body.appendChild(row);
+    function categoryClass(label) {
+      return label === 'USER' ? 'user' : 'system';
+    }
+
+    function renderCategoryTags(groups) {
+      categoryTags.replaceChildren();
+      if (groupMode.value === 'none') return;
+      for (const [label, processes] of groups) {
+        const key = groupKey(label);
+        const isOpen = !collapsedGroups.has(key);
+        const tag = document.createElement('button');
+        tag.className = 'category-tag ' + categoryClass(label);
+        tag.type = 'button';
+        tag.setAttribute('aria-pressed', String(isOpen));
+        tag.setAttribute('aria-label', (isOpen ? 'Hide ' : 'Show ') + label + ' processes');
+        tag.textContent = label;
+        const count = document.createElement('span');
+        count.className = 'category-tag-count';
+        count.textContent = '(' + processes.length + ')';
+        tag.appendChild(count);
+        tag.addEventListener('click', () => toggleGroup(key));
+        categoryTags.appendChild(tag);
+      }
     }
 
     function toggleGroup(key) {
@@ -214,6 +224,7 @@
       body.replaceChildren();
       const sorted = sortProcesses(processes);
       if (groupMode.value === 'none') {
+        renderCategoryTags(new Map());
         sorted.forEach(appendProcessRow);
         return;
       }
@@ -223,9 +234,22 @@
         if (!groups.has(label)) groups.set(label, []);
         groups.get(label).push(process);
       }
+      renderCategoryTags(groups);
+      let visible = false;
       for (const [label, groupedProcesses] of groups) {
-        appendGroupRow(label, groupedProcesses);
-        if (!collapsedGroups.has(groupKey(label))) groupedProcesses.forEach(appendProcessRow);
+        if (!collapsedGroups.has(groupKey(label))) {
+          groupedProcesses.forEach(appendProcessRow);
+          visible = true;
+        }
+      }
+      if (!visible) {
+        const row = document.createElement('tr');
+        row.className = 'category-empty';
+        const cell = document.createElement('td');
+        cell.colSpan = 9;
+        cell.textContent = 'Select a category tag to show processes';
+        row.appendChild(cell);
+        body.appendChild(row);
       }
     }
 
