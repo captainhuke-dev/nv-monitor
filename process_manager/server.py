@@ -13,6 +13,7 @@ from urllib.parse import urlsplit
 
 from .actions import StopRequest, stop_process
 from .collector import collect_processes
+from .memory import build_memory_summary, read_meminfo
 
 
 MAX_REQUEST_BYTES = 64 * 1024
@@ -142,6 +143,7 @@ class ProcessManagerHandler(BaseHTTPRequestHandler):
                 {
                     "generated_at": datetime.now(timezone.utc).isoformat(),
                     "processes": [record.to_dict() for record in records],
+                    "memory": build_memory_summary(read_meminfo(), records),
                 },
             )
             return

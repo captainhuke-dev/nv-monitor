@@ -142,6 +142,27 @@ The UI has a `CLASS (SYSTEM / USER)` column and a `REASON` column:
   `SYSTEM / USER` categories, groups by system reason, or a flat ungrouped
   list.
 
+### RAM breakdown tags
+
+The Process Manager also exposes the same RAM breakdown used by the DGX
+Dashboard 9000. Values are shown in both GiB and MB, and the memory tags are
+buttons that filter the process table where a PID-level view exists:
+
+- `GPU alloc` — sum of GPU memory reported for visible processes; click to show
+  rows with non-zero GPU memory.
+- `Model RSS*` — RSS of the ten largest visible processes, matching the
+  Dashboard's top-process view. File-backed model pages can overlap GPU/cache,
+  so this value is not additive.
+- `Active other` — active RAM not covered by GPU allocation. It is a residual
+  system-wide total; the button shows possible non-GPU RSS contributors, not an
+  exact additive ownership list.
+- `Cache` — reclaimable Linux page cache. It belongs to the kernel, is not a
+  process, and therefore has no PID that can be killed.
+- `Free` — RAM currently reported free by the kernel; it also has no PID row.
+
+The API returns the complete breakdown under `memory`, including `*_bytes`,
+`*_mb`, `*_gb`, and category metadata.
+
 ### Local-only startup
 
 Install the Python dependency outside the repository's source tree, then start

@@ -17,7 +17,8 @@
     .table-wrap { overflow: auto; padding: 14px 24px 28px; }
     table { width: 100%; border-collapse: collapse; font-size: .86rem; white-space: nowrap; }
     th, td { border-bottom: 1px solid #374151; padding: 8px 7px; text-align: left; vertical-align: top; }
-    th { position: sticky; top: 91px; background: #1f2937; }
+    /* Keep the table header in thead order; a sticky offset used to place PID 1 above it. */
+    th { background: #1f2937; }
     .sort-button { border: 0; padding: 0; background: transparent; color: inherit; font: inherit; font-weight: 700; }
     .sort-button:hover, .sort-button:focus-visible { color: #93c5fd; }
     .sort-indicator { color: #93c5fd; margin-left: 3px; }
@@ -30,6 +31,24 @@
     .category-tag:hover, .category-tag:focus-visible { filter: brightness(1.2); }
     .category-tag-count { margin-left: 4px; opacity: .75; }
     .category-empty td { color: #9ca3af; padding: 18px 7px; text-align: center; }
+    .memory-summary { padding: 10px 24px 8px; border-bottom: 1px solid #374151; }
+    .memory-summary-heading { display: flex; gap: 12px; align-items: baseline; flex-wrap: wrap; }
+    .memory-summary-heading strong { font-size: .95rem; }
+    .memory-total { color: #d1d5db; font-size: .82rem; }
+    .memory-tags { display: grid; grid-template-columns: repeat(auto-fit, minmax(175px, 1fr)); gap: 8px; margin-top: 8px; }
+    .memory-tag { min-height: 64px; text-align: left; display: flex; flex-direction: column; gap: 2px; border-radius: 8px; padding: 8px 10px; background: #1f2937; }
+    .memory-tag strong { font-size: .78rem; }
+    .memory-tag-value { font-size: .95rem; font-weight: 700; }
+    .memory-tag-meta { color: #9ca3af; font-size: .72rem; }
+    .memory-tag.gpu { border-color: #92400e; }
+    .memory-tag.model-rss { border-color: #1d4ed8; }
+    .memory-tag.active-other { border-color: #047857; }
+    .memory-tag.cache { border-color: #6d28d9; }
+    .memory-tag.free { border-color: #4b5563; }
+    .memory-tag[aria-pressed="false"] { opacity: .58; }
+    .memory-tag[aria-pressed="true"] { box-shadow: 0 0 0 1px #93c5fd; }
+    .memory-tag:hover, .memory-tag:focus-visible { filter: brightness(1.2); }
+    .memory-help { color: #9ca3af; font-size: .76rem; line-height: 1.45; margin-top: 8px; white-space: pre-line; }
     .action-buttons { display: flex; gap: 5px; }
     .badge { display: inline-block; border-radius: 999px; padding: 2px 7px; font-weight: 700; font-size: .72rem; }
     .system { background: #7f1d1d; color: #fecaca; }
@@ -55,6 +74,14 @@
       <span id="message" role="status"></span>
     </div>
   </header>
+  <section id="memory-summary" class="memory-summary" aria-label="RAM summary">
+    <div class="memory-summary-heading">
+      <strong>RAM breakdown</strong>
+      <span id="memory-total" class="memory-total">Waiting for authenticated metrics…</span>
+    </div>
+    <div id="memory-tags" class="memory-tags"></div>
+    <div id="memory-help" class="memory-help" role="note"></div>
+  </section>
   <div id="category-tags" class="category-tags" aria-label="Process categories"></div>
   <div class="table-wrap">
     <table>
@@ -77,11 +104,16 @@
     const message = document.getElementById('message');
     const body = document.getElementById('processes');
     const categoryTags = document.getElementById('category-tags');
+    const memoryTotal = document.getElementById('memory-total');
+    const memoryTags = document.getElementById('memory-tags');
+    const memoryHelp = document.getElementById('memory-help');
     const groupMode = document.getElementById('group-mode');
     const sortButtons = Array.from(document.querySelectorAll('[data-sort]'));
     tokenInput.value = sessionStorage.getItem('process-manager-token') || '';
 
     let currentProcesses = [];
+    let currentMemory = null;
+    let memoryFilter = 'all';
     let sortState = { key: 'pid', direction: 'asc' };
     const collapsedGroups = new Set();
 
@@ -92,6 +124,109 @@
       let index = 0;
       while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index++; }
       return amount.toFixed(index ? 1 : 0) + ' ' + units[index];
+    }
+
+    function formatMemoryValue(value, gigabyteDigits = 1) {
+      const bytes = Number(value) || 0;
+      const mb = Math.round(bytes / (1024 * 1024));
+      const gb = bytes / (1024 * 1024 * 1024);
+      const primary = gb >= 1 ? gb.toFixed(gigabyteDigits) + 'G' : mb.toLocaleString() + ' MB';
+      return primary + ' · ' + mb.toLocaleString() + ' MB';
+    }
+
+    function memoryCategory(key) {
+      return (currentMemory?.categories || []).find(category => category.key === key);
+    }
+
+    function memoryTagClass(key) {
+      return {
+        gpu_alloc: 'gpu',
+        model_rss: 'model-rss',
+        active_other: 'active-other',
+        cache: 'cache',
+        free: 'free',
+      }[key] || '';
+    }
+
+    function memoryFilterProcesses(processes) {
+      if (memoryFilter === 'all') return processes;
+      if (memoryFilter === 'gpu_alloc') {
+        return processes.filter(process => process.gpu_memory_bytes > 0);
+      }
+      if (memoryFilter === 'model_rss') {
+        const pids = new Set(currentMemory?.model_rss_pids || []);
+        return processes.filter(process => pids.has(process.pid));
+      }
+      if (memoryFilter === 'active_other') {
+        return processes.filter(process => process.gpu_memory_bytes === 0 && process.rss_bytes > 0);
+      }
+      if (memoryFilter === 'cache' || memoryFilter === 'free') return [];
+      return processes;
+    }
+
+    function memoryEmptyMessage() {
+      if (memoryFilter === 'cache') return 'Cache is kernel page cache; it has no process or PID row.';
+      if (memoryFilter === 'free') return 'Free RAM is a kernel metric; it has no process or PID row.';
+      if (memoryFilter === 'active_other') return 'No non-GPU RSS candidates were found for Active other.';
+      if (memoryFilter !== 'all') return 'No processes match this memory tag.';
+      return 'No readable processes found.';
+    }
+
+    function renderMemorySummary(memory) {
+      if (!memory) return;
+      memoryTotal.textContent = formatMemoryValue(memory.total_bytes) +
+        ' total · ' + formatMemoryValue(memory.used_bytes) + ' active · ' +
+        formatMemoryValue(memory.available_bytes) + ' available';
+      memoryTags.replaceChildren();
+      const entries = [
+        {
+          key: 'all',
+          label: 'RAM total',
+          bytes: memory.total_bytes,
+          meta: currentProcesses.length + ' readable processes',
+          description: 'Show all readable process rows.',
+        },
+        ...(memory.categories || []).filter(category => category.key !== 'free'),
+        memoryCategory('free'),
+      ].filter(Boolean);
+      for (const entry of entries) {
+        const tag = document.createElement('button');
+        tag.className = 'memory-tag ' + memoryTagClass(entry.key);
+        tag.type = 'button';
+        tag.dataset.memoryFilter = entry.key;
+        tag.setAttribute('aria-pressed', String(memoryFilter === entry.key));
+        tag.setAttribute('aria-label', 'Show ' + entry.label + ' process view');
+        const label = document.createElement('strong');
+        label.textContent = entry.label;
+        tag.appendChild(label);
+        const value = document.createElement('span');
+        value.className = 'memory-tag-value';
+        value.textContent = formatMemoryValue(entry.bytes, entry.key === 'model_rss' ? 0 : 1);
+        tag.appendChild(value);
+        const meta = document.createElement('span');
+        meta.className = 'memory-tag-meta';
+        if (entry.key === 'all') {
+          meta.textContent = entry.meta;
+        } else if (entry.scope === 'process') {
+          meta.textContent = (entry.process_count || 0) + ' process rows';
+        } else if (entry.scope === 'aggregate') {
+          meta.textContent = (entry.process_count || 0) + ' possible non-GPU RSS candidates';
+        } else {
+          meta.textContent = 'kernel metric · no PID rows';
+        }
+        tag.appendChild(meta);
+        tag.addEventListener('click', () => {
+          memoryFilter = entry.key;
+          renderMemorySummary(currentMemory);
+          render(currentProcesses);
+        });
+        memoryTags.appendChild(tag);
+      }
+      memoryHelp.textContent = [
+        '* Model RSS is the sum of the ten largest visible process RSS values; file-backed model pages can overlap GPU/cache.',
+        'Active other is active RAM not covered by GPU allocation. It is a residual total, so its candidate process rows are not additive.',
+        'Cache is reclaimable Linux page cache. It is kernel-owned memory, not a process, so there is no PID to kill.',
+      ].join('\n');
     }
 
     function authHeaders() {
@@ -220,12 +355,23 @@
       render(currentProcesses);
     }
 
+    function appendEmptyRow() {
+      const row = document.createElement('tr');
+      row.className = 'category-empty';
+      const cell = document.createElement('td');
+      cell.colSpan = 9;
+      cell.textContent = memoryEmptyMessage();
+      row.appendChild(cell);
+      body.appendChild(row);
+    }
+
     function render(processes) {
       body.replaceChildren();
-      const sorted = sortProcesses(processes);
+      const sorted = sortProcesses(memoryFilterProcesses(processes));
       if (groupMode.value === 'none') {
         renderCategoryTags(new Map());
-        sorted.forEach(appendProcessRow);
+        if (sorted.length) sorted.forEach(appendProcessRow);
+        else appendEmptyRow();
         return;
       }
       const groups = new Map();
@@ -243,13 +389,7 @@
         }
       }
       if (!visible) {
-        const row = document.createElement('tr');
-        row.className = 'category-empty';
-        const cell = document.createElement('td');
-        cell.colSpan = 9;
-        cell.textContent = 'Select a category tag to show processes';
-        row.appendChild(cell);
-        body.appendChild(row);
+        appendEmptyRow();
       }
     }
 
@@ -281,6 +421,8 @@
         const payload = await response.json();
         if (!response.ok) throw new Error(payload.message || payload.error_code);
         currentProcesses = payload.processes;
+        currentMemory = payload.memory || null;
+        renderMemorySummary(currentMemory);
         render(currentProcesses);
         message.textContent = 'Updated ' + new Date(payload.generated_at).toLocaleTimeString();
       } catch (error) {

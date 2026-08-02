@@ -91,6 +91,11 @@ class ServerTests(unittest.TestCase):
         self.assertIn("USER", page)
         self.assertIn("REASON", page)
         self.assertIn('id="group-mode"', page)
+        self.assertIn('id="memory-summary"', page)
+        self.assertIn("dataset.memoryFilter", page)
+        self.assertIn("cache", page)
+        self.assertIn("Active other", page)
+        self.assertIn("Model RSS", page)
         self.assertIn('data-sort="cpu"', page)
         self.assertIn('data-sort="gpu"', page)
         self.assertIn("function toggleSort", page)
@@ -98,6 +103,19 @@ class ServerTests(unittest.TestCase):
         self.assertIn('id="category-tags"', page)
         self.assertIn("category-tag", page)
         self.assertIn("aria-pressed", page)
+
+    def test_authenticated_process_list_includes_dashboard_memory_breakdown(self):
+        status, payload, _ = self._request("/api/processes", token="test-token")
+
+        self.assertEqual(status, 200)
+        memory = payload["memory"]
+        self.assertIn("total_mb", memory)
+        self.assertIn("active_other_mb", memory)
+        self.assertIn("cache_mb", memory)
+        self.assertEqual(
+            {category["key"] for category in memory["categories"]},
+            {"gpu_alloc", "model_rss", "active_other", "cache", "free"},
+        )
 
     def test_wildcard_bind_requires_explicit_override(self):
         with self.assertRaises(ValueError):
