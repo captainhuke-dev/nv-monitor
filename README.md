@@ -169,11 +169,19 @@ intended Tailscale users and ACLs.
 ### Automatic start on boot
 
 To install the root service on this DGX host, first ensure `psutil` is available
-to `/usr/bin/python3`, then create the root-only token and enable the unit:
+to `/usr/bin/python3`, deploy a root-readable runtime copy outside the user's
+home directory, then create the root-only token and enable the unit:
 
 ```bash
+sudo install -d -o root -g root -m 0755 /opt/nv-process-manager/process_manager/static
+sudo install -o root -g root -m 0644 process_manager/*.py \
+  /opt/nv-process-manager/process_manager/
+sudo install -o root -g root -m 0644 process_manager/static/index.html \
+  /opt/nv-process-manager/process_manager/static/index.html
 sudo install -d -o root -g root -m 0700 /etc/nv-process-manager
-sudo sh -c 'umask 077; openssl rand -hex 32 > /etc/nv-process-manager/token'
+if ! sudo test -s /etc/nv-process-manager/token; then
+  sudo sh -c 'umask 077; openssl rand -hex 32 > /etc/nv-process-manager/token'
+fi
 sudo install -d -o root -g root -m 0750 /var/log/nv-process-manager
 sudo install -o root -g root -m 0644 \
   process_manager/nv-process-manager.service.example \

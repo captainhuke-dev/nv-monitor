@@ -179,7 +179,7 @@ Expected: PASS.
 
 **Interfaces:**
 - requirements.txt pins psutil>=5.9,<6.
-- The example systemd unit runs the service with a root-only token file, waits for an explicit Tailscale IP, restarts on failure, writes audit logs outside Git, and is enabled explicitly with systemctl.
+- The example systemd unit runs a root-owned runtime copy outside the user's home with a root-only token file, waits for an explicit Tailscale IP, restarts on failure, writes audit logs outside Git, and is enabled explicitly with systemctl.
 
 - [ ] Step 1: Write service and usage documentation.
 
