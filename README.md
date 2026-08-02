@@ -115,6 +115,60 @@ Or install system-wide:
 sudo make install
 ```
 
+## Process Manager — port 9001
+
+This fork also contains a separate authenticated web Process Manager under
+`process_manager/`. It inventories every readable Linux process and provides
+guarded `Stop`/`Force` actions. The service is not started by `make` and is not
+installed automatically.
+
+### System labels
+
+The UI has a `CLASS (SYSTEM / USER)` column and a `REASON` column:
+
+- `SYSTEM` means the process is root-owned, PID 1, a kernel thread, or inside
+  the `system.slice`/`init.scope` systemd cgroup.
+- `USER` means none of those system signals were observed.
+- PID 1 and kernel threads are always protected from this API.
+- Other `SYSTEM` processes require explicit confirmation before stopping.
+- Every action rechecks the PID creation time to prevent PID reuse errors.
+
+### Local-only startup
+
+Install the Python dependency outside the repository's source tree, then start
+the service with a token supplied through the environment:
+
+```bash
+python3 -m pip install --user -r requirements.txt
+export PROCESS_MANAGER_TOKEN='use-a-long-random-token'
+python3 -m process_manager.run --host 127.0.0.1 --port 9001
+```
+
+Open `http://127.0.0.1:9001/`. The health endpoint is
+`GET /healthz`; process data and actions require the Bearer token.
+
+### Tailscale startup
+
+For the DGX host, use the Tailscale address explicitly rather than binding all
+interfaces:
+
+```bash
+python3 -m process_manager.run \
+  --host 100.108.68.20 \
+  --port 9001 \
+  --token-file /etc/nv-process-manager/token \
+  --audit-log /var/log/nv-process-manager/audit.jsonl
+```
+
+Keep the token file outside Git with mode `0600`. The example unit is
+`process_manager/nv-process-manager.service.example`; review the IP, token path,
+and privilege policy before installing it. The service has permission to signal
+processes, so expose it only to the intended Tailscale users and ACLs.
+
+Audit records default to
+`~/.local/state/nv-process-manager/audit.jsonl` and can be redirected with
+`--audit-log`.
+
 ### Command-line options
 
 | Flag      | Description                                | Default |

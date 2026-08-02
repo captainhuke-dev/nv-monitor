@@ -1,0 +1,24 @@
+[Unit]
+Description=DGX Process Manager on Tailscale port 9001
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+Group=root
+WorkingDirectory=/home/mctdgx01/projects/nv-monitor
+ExecStart=/usr/bin/python3 -m process_manager.run --host 100.108.68.20 --port 9001 --token-file /etc/nv-process-manager/token --audit-log /var/log/nv-process-manager/audit.jsonl
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=read-only
+ReadWritePaths=/var/log/nv-process-manager
+CapabilityBoundingSet=CAP_KILL
+AmbientCapabilities=CAP_KILL
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+
+[Install]
+WantedBy=multi-user.target

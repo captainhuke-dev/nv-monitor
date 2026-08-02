@@ -1,0 +1,154 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>DGX Process Manager</title>
+  <style>
+    :root { color-scheme: dark; font-family: system-ui, sans-serif; }
+    body { margin: 0; background: #111827; color: #e5e7eb; }
+    header { padding: 18px 24px; background: #1f2937; position: sticky; top: 0; z-index: 2; }
+    h1 { margin: 0 0 10px; font-size: 1.35rem; }
+    .controls { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+    input, button { border: 1px solid #4b5563; border-radius: 5px; padding: 7px 10px; background: #111827; color: #e5e7eb; }
+    button { cursor: pointer; background: #374151; }
+    button:disabled { cursor: not-allowed; opacity: .45; }
+    #message { min-height: 1.3em; color: #fbbf24; }
+    .table-wrap { overflow: auto; padding: 14px 24px 28px; }
+    table { width: 100%; border-collapse: collapse; font-size: .86rem; white-space: nowrap; }
+    th, td { border-bottom: 1px solid #374151; padding: 8px 7px; text-align: left; vertical-align: top; }
+    th { position: sticky; top: 91px; background: #1f2937; }
+    .badge { display: inline-block; border-radius: 999px; padding: 2px 7px; font-weight: 700; font-size: .72rem; }
+    .system { background: #7f1d1d; color: #fecaca; }
+    .user { background: #1e3a8a; color: #bfdbfe; }
+    .reason { color: #fca5a5; font-size: .75rem; margin-top: 3px; }
+    .command { max-width: 620px; overflow: hidden; text-overflow: ellipsis; }
+    .protected { color: #9ca3af; font-size: .75rem; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>DGX Process Manager — port 9001</h1>
+    <div class="controls">
+      <input id="token" type="password" placeholder="Bearer token" autocomplete="off">
+      <button id="save-token">Save token</button>
+      <button id="refresh">Refresh</button>
+      <span id="message" role="status"></span>
+    </div>
+  </header>
+  <div class="table-wrap">
+    <table>
+      <thead><tr><th>CLASS (SYSTEM / USER)</th><th>REASON</th><th>PID</th><th>USER</th><th>CPU</th><th>RAM</th><th>GPU MEM</th><th>COMMAND</th><th>ACTION</th></tr></thead>
+      <tbody id="processes"></tbody>
+    </table>
+  </div>
+  <script>
+    const tokenInput = document.getElementById('token');
+    const message = document.getElementById('message');
+    const body = document.getElementById('processes');
+    tokenInput.value = sessionStorage.getItem('process-manager-token') || '';
+
+    function formatBytes(value) {
+      if (!value) return '0 B';
+      const units = ['B', 'KiB', 'MiB', 'GiB'];
+      let amount = value;
+      let index = 0;
+      while (amount >= 1024 && index < units.length - 1) { amount /= 1024; index++; }
+      return amount.toFixed(index ? 1 : 0) + ' ' + units[index];
+    }
+
+    function authHeaders() {
+      const token = tokenInput.value.trim();
+      return token ? { 'Authorization': 'Bearer ' + token } : {};
+    }
+
+    function addCell(row, text, className) {
+      const cell = document.createElement('td');
+      if (className) cell.className = className;
+      cell.textContent = text;
+      row.appendChild(cell);
+      return cell;
+    }
+
+    function render(processes) {
+      body.replaceChildren();
+      for (const process of processes) {
+        const row = document.createElement('tr');
+        const classCell = document.createElement('td');
+        const badge = document.createElement('span');
+        badge.className = 'badge ' + (process.is_system ? 'system' : 'user');
+        badge.textContent = process.classification;
+        classCell.appendChild(badge);
+        row.appendChild(classCell);
+        addCell(row, process.system_reason_labels.join(', ') || '—', 'reason');
+        addCell(row, String(process.pid));
+        addCell(row, process.user);
+        addCell(row, process.cpu_percent.toFixed(1) + '%');
+        addCell(row, formatBytes(process.rss_bytes));
+        addCell(row, formatBytes(process.gpu_memory_bytes));
+        addCell(row, process.cmdline, 'command');
+        const actionCell = document.createElement('td');
+        const stop = document.createElement('button');
+        stop.textContent = 'Stop';
+        stop.disabled = process.protected;
+        stop.title = process.protected ? 'Protected system process' : 'Send SIGTERM';
+        stop.addEventListener('click', () => stopProcess(process, false));
+        actionCell.appendChild(stop);
+        const force = document.createElement('button');
+        force.textContent = 'Force';
+        force.disabled = process.protected;
+        force.title = process.protected ? 'Protected system process' : 'Send SIGKILL';
+        force.addEventListener('click', () => stopProcess(process, true));
+        actionCell.appendChild(force);
+        if (process.protected) {
+          const note = document.createElement('div');
+          note.className = 'protected';
+          note.textContent = 'protected';
+          actionCell.appendChild(note);
+        }
+        row.appendChild(actionCell);
+        body.appendChild(row);
+      }
+    }
+
+    let loading = false;
+    async function loadProcesses() {
+      if (loading) return;
+      loading = true;
+      try {
+        const response = await fetch('/api/processes', { headers: authHeaders(), cache: 'no-store' });
+        const payload = await response.json();
+        if (!response.ok) throw new Error(payload.message || payload.error_code);
+        render(payload.processes);
+        message.textContent = 'Updated ' + new Date(payload.generated_at).toLocaleTimeString();
+      } catch (error) {
+        message.textContent = String(error.message || error);
+      } finally {
+        loading = false;
+      }
+    }
+
+    async function stopProcess(process, force) {
+      const label = process.classification + ' PID ' + process.pid;
+      const reason = process.system_reason_labels.join(', ');
+      const confirmation = force ? 'Force kill ' + label + '?' : 'Stop ' + label + '?';
+      if (!window.confirm(reason ? confirmation + '\nReason: ' + reason : confirmation)) return;
+      const response = await fetch('/api/processes/' + process.pid + '/stop', {
+        method: 'POST', headers: { ...authHeaders(), 'Content-Type': 'application/json' },
+        body: JSON.stringify({ expected_create_time: process.create_time, confirm_system: process.is_system, force })
+      });
+      const payload = await response.json();
+      message.textContent = payload.message || payload.error_code;
+      await loadProcesses();
+    }
+
+    document.getElementById('save-token').addEventListener('click', () => {
+      sessionStorage.setItem('process-manager-token', tokenInput.value.trim());
+      loadProcesses();
+    });
+    document.getElementById('refresh').addEventListener('click', loadProcesses);
+    loadProcesses();
+    setInterval(loadProcesses, 2000);
+  </script>
+</body>
+</html>
