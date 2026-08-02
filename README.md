@@ -120,7 +120,7 @@ sudo make install
 This fork also contains a separate authenticated web Process Manager under
 `process_manager/`. It inventories every readable Linux process and provides
 guarded `Stop`/`Force` actions. The service is not started by `make` and is not
-installed automatically.
+installed automatically by the source checkout.
 
 ### System labels
 
@@ -161,9 +161,31 @@ python3 -m process_manager.run \
 ```
 
 Keep the token file outside Git with mode `0600`. The example unit is
-`process_manager/nv-process-manager.service.example`; review the IP, token path,
-and privilege policy before installing it. The service has permission to signal
-processes, so expose it only to the intended Tailscale users and ACLs.
+`process_manager/nv-process-manager.service.example`; it binds only to
+`100.108.68.20`, waits for Tailscale during boot, and restarts after failure.
+The service has permission to signal processes, so expose it only to the
+intended Tailscale users and ACLs.
+
+### Automatic start on boot
+
+To install the root service on this DGX host, first ensure `psutil` is available
+to `/usr/bin/python3`, then create the root-only token and enable the unit:
+
+```bash
+sudo install -d -o root -g root -m 0700 /etc/nv-process-manager
+sudo sh -c 'umask 077; openssl rand -hex 32 > /etc/nv-process-manager/token'
+sudo install -d -o root -g root -m 0750 /var/log/nv-process-manager
+sudo install -o root -g root -m 0644 \
+  process_manager/nv-process-manager.service.example \
+  /etc/systemd/system/nv-process-manager.service
+sudo systemctl daemon-reload
+sudo systemctl enable --now nv-process-manager.service
+sudo systemctl status nv-process-manager.service
+```
+
+`enable` makes it start at boot; `--now` starts it immediately. The unit runs
+as root so it can inventory and signal processes owned by other users. Check
+`http://100.108.68.20:9001/` only over the intended Tailscale network.
 
 Audit records default to
 `~/.local/state/nv-process-manager/audit.jsonl` and can be redirected with

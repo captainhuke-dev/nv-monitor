@@ -21,7 +21,7 @@
 - Other SYSTEM targets require confirm_system=true; force-stop requires force=true.
 - Every stop attempt must verify PID, creation time, and current classification immediately before signaling.
 - Audit logs must be written outside Git, defaulting to ~/.local/state/nv-process-manager/audit.jsonl.
-- The service is not started or installed automatically by this implementation; provide an example unit and explicit run instructions.
+- The source checkout does not install or start the privileged service implicitly; provide a hardened unit and explicit enable-at-boot instructions.
 - All new production behavior must have a test written and observed failing before implementation.
 
 ---
@@ -179,7 +179,7 @@ Expected: PASS.
 
 **Interfaces:**
 - requirements.txt pins psutil>=5.9,<6.
-- The example systemd unit runs the service with an environment token file, binds to an explicit Tailscale IP, writes audit logs outside Git, and does not auto-install or start.
+- The example systemd unit runs the service with a root-only token file, waits for an explicit Tailscale IP, restarts on failure, writes audit logs outside Git, and is enabled explicitly with systemctl.
 
 - [ ] Step 1: Write service and usage documentation.
 
@@ -212,4 +212,4 @@ Expected: the branch is published without changing main.
 
 ## Verification Summary
 
-The feature is complete only when the full Python suite, existing C unit test, compile check, and diff check pass; the service remains stopped; the UI labels system rows with reasons; unauthenticated API access is rejected; protected processes cannot be signaled; and the feature branch contains no credentials or runtime evidence.
+The feature is complete only when the full Python suite, existing C unit test, compile check, and diff check pass; the UI labels system rows with reasons; unauthenticated API access is rejected; protected processes cannot be signaled; the boot unit waits for Tailscale and restarts on failure; and the feature branch contains no credentials or runtime evidence.

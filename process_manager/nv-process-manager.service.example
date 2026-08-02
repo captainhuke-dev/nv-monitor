@@ -1,16 +1,21 @@
 [Unit]
 Description=DGX Process Manager on Tailscale port 9001
-After=network-online.target
-Wants=network-online.target
+Wants=network-online.target tailscaled.service
+After=network-online.target tailscaled.service
+StartLimitIntervalSec=0
 
 [Service]
 Type=simple
 User=root
 Group=root
 WorkingDirectory=/home/mctdgx01/projects/nv-monitor
+# Do not bind until the configured Tailscale address exists after boot.
+ExecStartPre=/bin/sh -c 'until /usr/bin/tailscale ip -4 | /usr/bin/grep -Fxq 100.108.68.20; do sleep 2; done'
 ExecStart=/usr/bin/python3 -m process_manager.run --host 100.108.68.20 --port 9001 --token-file /etc/nv-process-manager/token --audit-log /var/log/nv-process-manager/audit.jsonl
 Restart=on-failure
-RestartSec=3
+RestartSec=5
+TimeoutStopSec=15
+UMask=0077
 NoNewPrivileges=yes
 PrivateTmp=yes
 ProtectSystem=strict
@@ -19,6 +24,8 @@ ReadWritePaths=/var/log/nv-process-manager
 CapabilityBoundingSet=CAP_KILL
 AmbientCapabilities=CAP_KILL
 RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictSUIDSGID=yes
+LockPersonality=yes
 
 [Install]
 WantedBy=multi-user.target
