@@ -157,7 +157,8 @@ buttons that filter the process table where a PID-level view exists:
   system-wide total; the button shows possible non-GPU RSS contributors, not an
   exact additive ownership list.
 - `Cache` — reclaimable Linux page cache. It belongs to the kernel, is not a
-  process, and therefore has no PID that can be killed.
+  process, and therefore has no PID that can be killed. Selecting the tag shows
+  a `KERNEL` summary row instead of an empty process list.
 - `Free` — RAM currently reported free by the kernel; it also has no PID row.
 
 The API returns the complete breakdown under `memory`, including `*_bytes`,

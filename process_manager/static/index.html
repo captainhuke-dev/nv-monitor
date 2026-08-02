@@ -53,6 +53,7 @@
     .badge { display: inline-block; border-radius: 999px; padding: 2px 7px; font-weight: 700; font-size: .72rem; }
     .system { background: #7f1d1d; color: #fecaca; }
     .user { background: #1e3a8a; color: #bfdbfe; }
+    .kernel { background: #4b5563; color: #e5e7eb; }
     .reason { color: #fca5a5; font-size: .75rem; margin-top: 3px; }
     .command { max-width: 620px; overflow: hidden; text-overflow: ellipsis; }
     .protected { color: #9ca3af; font-size: .75rem; }
@@ -355,6 +356,34 @@
       render(currentProcesses);
     }
 
+    function appendMemoryMetricRow(category) {
+      if (!category) {
+        appendEmptyRow();
+        return;
+      }
+      const row = document.createElement('tr');
+      const classCell = document.createElement('td');
+      const badge = document.createElement('span');
+      badge.className = 'badge kernel';
+      badge.textContent = 'KERNEL';
+      classCell.appendChild(badge);
+      row.appendChild(classCell);
+      addCell(row, category.key === 'cache' ? 'reclaimable page cache' : 'free RAM', 'reason');
+      addCell(row, '—');
+      addCell(row, 'kernel');
+      addCell(row, '—');
+      addCell(row, formatMemoryValue(category.bytes));
+      addCell(row, '0 B');
+      addCell(row, category.description + ' No PID owns this memory.', 'command');
+      const actionCell = document.createElement('td');
+      const note = document.createElement('span');
+      note.className = 'protected';
+      note.textContent = 'not a process';
+      actionCell.appendChild(note);
+      row.appendChild(actionCell);
+      body.appendChild(row);
+    }
+
     function appendEmptyRow() {
       const row = document.createElement('tr');
       row.className = 'category-empty';
@@ -367,6 +396,11 @@
 
     function render(processes) {
       body.replaceChildren();
+      if (memoryFilter === 'cache' || memoryFilter === 'free') {
+        renderCategoryTags(new Map());
+        appendMemoryMetricRow(memoryCategory(memoryFilter));
+        return;
+      }
       const sorted = sortProcesses(memoryFilterProcesses(processes));
       if (groupMode.value === 'none') {
         renderCategoryTags(new Map());
