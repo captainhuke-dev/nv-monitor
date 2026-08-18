@@ -13,18 +13,10 @@ def _default_audit_path() -> Path:
     return Path.home() / ".local" / "state" / "nv-process-manager" / "audit.jsonl"
 
 
-def _read_token(args: argparse.Namespace) -> str:
-    if args.token_file:
-        return Path(args.token_file).read_text(encoding="utf-8").strip()
-    return args.token or os.environ.get("PROCESS_MANAGER_TOKEN", "")
-
-
 def build_parser() -> argparse.ArgumentParser:
-    parser = argparse.ArgumentParser(description="Authenticated Linux process manager")
+    parser = argparse.ArgumentParser(description="Tailscale-scoped Linux process manager")
     parser.add_argument("--host", default=os.environ.get("PROCESS_MANAGER_HOST", "127.0.0.1"))
     parser.add_argument("--port", type=int, default=int(os.environ.get("PROCESS_MANAGER_PORT", "9001")))
-    parser.add_argument("--token", help="development-only token; prefer PROCESS_MANAGER_TOKEN")
-    parser.add_argument("--token-file")
     parser.add_argument(
         "--audit-log",
         type=Path,
@@ -38,10 +30,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     if args.host in WILDCARD_HOSTS and os.environ.get("PROCESS_MANAGER_ALLOW_WILDCARD") != "1":
         parser.error("wildcard host requires PROCESS_MANAGER_ALLOW_WILDCARD=1")
-    token = _read_token(args)
-    if not token:
-        parser.error("provide --token-file, --token, or PROCESS_MANAGER_TOKEN")
-    server = create_server(args.host, args.port, token=token, audit_log_path=args.audit_log)
+    server = create_server(args.host, args.port, audit_log_path=args.audit_log)
     print(f"Process Manager listening on http://{args.host}:{args.port}")
     try:
         server.serve_forever()

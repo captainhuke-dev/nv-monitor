@@ -117,10 +117,14 @@ sudo make install
 
 ## Process Manager — port 9001
 
-This fork also contains a separate authenticated web Process Manager under
+This fork also contains a separate Tailscale-scoped web Process Manager under
 `process_manager/`. It inventories every readable Linux process and provides
 guarded `Stop`/`Force` actions. The service is not started by `make` and is not
 installed automatically by the source checkout.
+
+The Process Manager does not use a bearer token. Access is restricted by the
+explicit Tailscale bind address (`100.108.68.20`) and the host's Tailscale
+ACLs. Any client that can reach this address can view and control processes.
 
 ### System labels
 
@@ -167,16 +171,15 @@ The API returns the complete breakdown under `memory`, including `*_bytes`,
 ### Local-only startup
 
 Install the Python dependency outside the repository's source tree, then start
-the service with a token supplied through the environment:
+the service on the intended interface:
 
 ```bash
 python3 -m pip install --user -r requirements.txt
-export PROCESS_MANAGER_TOKEN='use-a-long-random-token'
 python3 -m process_manager.run --host 127.0.0.1 --port 9001
 ```
 
 Open `http://127.0.0.1:9001/`. The health endpoint is
-`GET /healthz`; process data and actions require the Bearer token.
+`GET /healthz`; process data and actions are available without a token.
 
 ### Tailscale startup
 
@@ -187,13 +190,12 @@ interfaces:
 python3 -m process_manager.run \
   --host 100.108.68.20 \
   --port 9001 \
-  --token-file /etc/nv-process-manager/token \
   --audit-log /var/log/nv-process-manager/audit.jsonl
 ```
 
-Keep the token file outside Git with mode `0600`. The example unit is
-`process_manager/nv-process-manager.service.example`; it binds only to
-`100.108.68.20`, waits for Tailscale during boot, and restarts after failure.
+The example unit is `process_manager/nv-process-manager.service.example`; it
+binds only to `100.108.68.20`, waits for Tailscale during boot, and restarts
+after failure.
 The service has permission to signal processes, so expose it only to the
 intended Tailscale users and ACLs.
 
@@ -201,7 +203,7 @@ intended Tailscale users and ACLs.
 
 To install the root service on this DGX host, first ensure `psutil` is available
 to `/usr/bin/python3`, deploy a root-readable runtime copy outside the user's
-home directory, then create the root-only token and enable the unit:
+home directory, then enable the unit:
 
 ```bash
 sudo install -d -o root -g root -m 0755 /opt/nv-process-manager/process_manager/static
@@ -209,10 +211,6 @@ sudo install -o root -g root -m 0644 process_manager/*.py \
   /opt/nv-process-manager/process_manager/
 sudo install -o root -g root -m 0644 process_manager/static/index.html \
   /opt/nv-process-manager/process_manager/static/index.html
-sudo install -d -o root -g root -m 0700 /etc/nv-process-manager
-if ! sudo test -s /etc/nv-process-manager/token; then
-  sudo sh -c 'umask 077; openssl rand -hex 32 > /etc/nv-process-manager/token'
-fi
 sudo install -d -o root -g root -m 0750 /var/log/nv-process-manager
 sudo install -o root -g root -m 0644 \
   process_manager/nv-process-manager.service.example \

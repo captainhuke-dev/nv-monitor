@@ -15,7 +15,6 @@ class ServerTests(unittest.TestCase):
         self.server = create_server(
             "127.0.0.1",
             0,
-            token="test-token",
             audit_log_path=Path(self.temp_dir.name) / "audit.jsonl",
         )
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
@@ -28,11 +27,9 @@ class ServerTests(unittest.TestCase):
         self.thread.join(timeout=3)
         self.temp_dir.cleanup()
 
-    def _request(self, path, *, method="GET", payload=None, token=None):
+    def _request(self, path, *, method="GET", payload=None):
         body = None if payload is None else json.dumps(payload).encode()
         headers = {"Content-Type": "application/json"}
-        if token is not None:
-            headers["Authorization"] = f"Bearer {token}"
         request = Request(
             f"{self.base_url}{path}",
             data=body,
@@ -51,17 +48,14 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(payload, {"ok": True})
 
-    def test_process_list_requires_bearer_token(self):
+    def test_process_list_is_available_without_authentication(self):
         status, payload, _ = self._request("/api/processes")
 
-        self.assertEqual(status, 401)
-        self.assertEqual(payload["error_code"], "unauthorized")
+        self.assertEqual(status, 200)
+        self.assertIn("processes", payload)
 
-    def test_authenticated_process_list_labels_pid_one_as_system(self):
-        status, payload, headers = self._request(
-            "/api/processes",
-            token="test-token",
-        )
+    def test_process_list_labels_pid_one_as_system(self):
+        status, payload, headers = self._request("/api/processes")
 
         self.assertEqual(status, 200)
         self.assertEqual(headers["Cache-Control"], "no-store")
@@ -75,7 +69,6 @@ class ServerTests(unittest.TestCase):
             "/api/processes/999999/stop",
             method="POST",
             payload={},
-            token="test-token",
         )
 
         self.assertEqual(status, 400)
@@ -89,6 +82,9 @@ class ServerTests(unittest.TestCase):
         self.assertEqual(response.status, 200)
         self.assertIn("SYSTEM", page)
         self.assertIn("USER", page)
+        self.assertNotIn("Bearer token", page)
+        self.assertNotIn("authHeaders", page)
+        self.assertNotIn("sessionStorage", page)
         self.assertIn("REASON", page)
         self.assertIn('id="group-mode"', page)
         self.assertIn('id="memory-summary"', page)
@@ -107,8 +103,8 @@ class ServerTests(unittest.TestCase):
         self.assertIn("category-tag", page)
         self.assertIn("aria-pressed", page)
 
-    def test_authenticated_process_list_includes_dashboard_memory_breakdown(self):
-        status, payload, _ = self._request("/api/processes", token="test-token")
+    def test_process_list_includes_dashboard_memory_breakdown(self):
+        status, payload, _ = self._request("/api/processes")
 
         self.assertEqual(status, 200)
         memory = payload["memory"]
@@ -125,18 +121,13 @@ class ServerTests(unittest.TestCase):
             create_server(
                 "0.0.0.0",
                 0,
-                token="test-token",
                 audit_log_path=Path(self.temp_dir.name) / "audit.jsonl",
             )
 
-    def test_empty_token_is_rejected_before_binding(self):
-        with self.assertRaises(ValueError):
-            create_server(
-                "127.0.0.1",
-                0,
-                token="",
-                audit_log_path=Path(self.temp_dir.name) / "audit.jsonl",
-            )
+    def test_systemd_unit_does_not_require_a_token_file(self):
+        unit = (Path(__file__).parents[1] / "process_manager" / "nv-process-manager.service.example").read_text()
+
+        self.assertNotIn("--token-file", unit)
 
 
 if __name__ == "__main__":
